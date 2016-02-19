@@ -25,3 +25,15 @@ Webdelbrot has a few other flags.  Try -help.
 Left click to begin highlighting zoom region.  Left click again to zoom.
 
 Middle quick or "q" to cancel zoom selection.
+
+## Credits
+
+**John Morrice**
+
+http://functorama.com
+
+https://github.com/johnny-morrice
+
+## License
+
+We use an MIT style license.  See LICENSE.txt for terms of use and distribution.
