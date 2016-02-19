@@ -1,15 +1,15 @@
 package main
 
 import (
-    "fmt"
-    "net/http"
+    "bytes"
     "encoding/json"
-    "time"
+    "fmt"
     "image/png"
     "log"
-    "functorama.com/demo/libgodelbrot"
-    "bytes"
-    "runtime"
+    "net/http"
+    "strconv"
+    "strings"
+    lib "github.com/johnny-morrice/godelbrot/libgodelbrot"
 )
 
 type WebCommand string
@@ -18,7 +18,7 @@ const (
     displayImage = WebCommand("displayImage")
 )
 
-type WebRenderParameters struct {
+type WebRenderParams struct {
     ImageWidth uint
     ImageHeight uint
     RealMin float64
@@ -27,16 +27,9 @@ type WebRenderParameters struct {
     ImagMax float64
 }
 
-type RenderMetadata struct {
-    Renderer string
-    Palette string
-    RenderDuration string
-}
-
 type GodelbrotPacket struct {
     Command WebCommand
-    Render WebRenderParameters
-    Metadata RenderMetadata
+    Render WebRenderParams
 }
 
 const godelbrotHeader string = "X-Godelbrot-Packet"
@@ -56,10 +49,10 @@ type renderQueueItem struct {
     complete chan<- bool
 }
 
-func launchRenderService() (func(http.ResponseWriter, *http.Request), chan<- renderQueueItem) {
-    input := make(chan renderQueueItem, libgodelbrot.Kilo)
+func launchRenderService(desc *lib.Info) (func(http.ResponseWriter, *http.Request), chan<- renderQueueItem) {
+    input := make(chan renderQueueItem)
 
-    go handleRenderRequests(input)
+    go handleRenderRequests(desc, input)
 
     return httpChanWriter(input), input
 }
@@ -68,8 +61,8 @@ func httpChanWriter(input chan<- renderQueueItem) func(http.ResponseWriter, *htt
     return func (w http.ResponseWriter, req *http.Request) {
         done := make(chan bool)
         input <- renderQueueItem{
-            command: queueRender, 
-            w: w, 
+            command: queueRender,
+            w: w,
             req: req,
             complete: done,
         }
@@ -78,98 +71,61 @@ func httpChanWriter(input chan<- renderQueueItem) func(http.ResponseWriter, *htt
     }
 }
 
-type httpRenderBase struct {
+type webservice struct {
     queueItem renderQueueItem
-    renderParams libgodelbrot.RenderParameters
-    palette libgodelbrot.Palette
-    renderer libgodelbrot.Renderer
-    metadata RenderMetadata 
+    desc *lib.Info
 }
 
-func handleRenderRequests(input <-chan renderQueueItem) {
-    processed := false
-    run := true
+func handleRenderRequests(desc *lib.Info, input <-chan renderQueueItem) {
+    serv := webservice{}
+    serv.desc = desc
 
-    // Values constant across all renders
-    iterateLimit := uint8(255)
-    renderBase := httpRenderBase{
-        renderParams: libgodelbrot.RenderParameters{
-            IterateLimit: iterateLimit,
-            DivergeLimit: 4.0,
-            RegionCollapse: 2,
-            Frame: libgodelbrot.CornerFrame,
-            RenderThreads: libgodelbrot.DefaultRenderThreads(),
-            BufferSize: libgodelbrot.DefaultBufferSize,
-            FixAspect: true,
-        },
-        metadata: RenderMetadata{
-            Renderer: "ConcurrentRegionRender",
-            Palette: "Pretty",
-        },
-        palette: libgodelbrot.NewPrettyPalette(iterateLimit),
-        renderer: libgodelbrot.ConcurrentRegionRender,
-    }
-
-    for run {
-        select {
-        case queueItem := <- input:
-            switch queueItem.command {
-            case queueRender:
-                renderBase.queueItem = queueItem
-                renderBase.render()
-                processed = true
-            case queueStop:
-                run = false
-            default:
-                panic(fmt.Sprintf("Unknown queueCommand: %v", queueItem.command))
-            } 
+    for queue := range input {
+        switch queue.command {
+        case queueRender:
+            serv.queueItem = queue
+            serv.render()
+        case queueStop:
+            break
         default:
-            if processed {
-                // No renders waiting...
-                // A good time to force GC!
-                runtime.GC()
-                processed = false 
-            }
+            panic(fmt.Sprintf("Unknown queueCommand: %v", queue.command))
         }
     }
 }
 
-func (renderBase httpRenderBase) render() {
-
-    jsonPacket := renderBase.queueItem.req.URL.Query().Get(godelbrotGetParam)
+func (serv webservice) render() {
+    jsonPacket := serv.queueItem.req.URL.Query().Get(godelbrotGetParam)
 
     if len(jsonPacket) == 0 {
-        http.Error(renderBase.queueItem.w, fmt.Sprintf("No data found in parameter '%v'", godelbrotHeader), 400)
+        http.Error(serv.queueItem.w, fmt.Sprintf("No data found in parameter '%v'", godelbrotHeader), 400)
         return
     }
 
-    jsonBytes := []byte(jsonPacket)
+    dec := json.NewDecoder(strings.NewReader(jsonPacket))
     userPacket := GodelbrotPacket{}
-    jsonError := json.Unmarshal(jsonBytes, &userPacket)
+    jsonError := dec.Decode(&userPacket)
 
     if jsonError != nil {
-        http.Error(renderBase.queueItem.w, fmt.Sprintf("Invalid JSON packet: %v", jsonError), 400)
+        http.Error(serv.queueItem.w, fmt.Sprintf("Invalid JSON packet: %v", jsonError), 400)
         return
     }
 
     args := userPacket.Render
 
     if args.ImageWidth == 0 || args.ImageHeight == 0 {
-        http.Error(renderBase.queueItem.w, "ImageHeight and ImageWidth cannot be 0", 422)
+        http.Error(serv.queueItem.w, "ImageHeight and ImageWidth cannot be 0", 422)
         return
     }
 
-    renderParams := renderBase.renderParams
-    renderParams.Width = args.ImageWidth
-    renderParams.Height = args.ImageHeight
-    renderParams.TopLeft = complex(args.RealMin, args.ImagMax)
-    renderParams.BottomRight = complex(args.RealMax, args.ImagMin)
+    desc, cerr := serv.configure(args)
 
-    config := renderParams.Configure()
+    if cerr != nil {
+        msg := fmt.Sprintf("Error in configuration: %v", cerr)
+        http.Error(serv.queueItem.w, msg, 400)
+        return
+    }
 
-    t0 := time.Now()
-    pic, renderError := renderBase.renderer(config, renderBase.palette)
-    t1 := time.Now()
+    pic, renderError := lib.Render(desc)
 
     if renderError != nil {
         log.Fatal(fmt.Sprintf("Render error: %v", renderError))
@@ -180,32 +136,52 @@ func (renderBase httpRenderBase) render() {
 
     if pngError != nil {
         log.Println("Error encoding PNG: ", pngError)
-        http.Error(renderBase.queueItem.w, fmt.Sprintf("Error encoding PNG: %v", pngError), 500)
+        http.Error(serv.queueItem.w, fmt.Sprintf("Error encoding PNG: %v", pngError), 500)
     }
 
     // Craft response
     responsePacket := GodelbrotPacket{
         Command: displayImage,
-        Metadata: renderBase.metadata,
     }
-    responsePacket.Metadata.RenderDuration = t1.Sub(t0).String()
-
-    log.Println("Render complete in ", responsePacket.Metadata.RenderDuration, 
-        "plane co-ords: ", config.TopLeft, config.BottomRight)
 
     responseHeaderPacket, marshalError := json.Marshal(responsePacket)
 
     if marshalError != nil {
-        http.Error(renderBase.queueItem.w, fmt.Sprintf("Error marshalling response header: %v", marshalError), 500)
+        http.Error(serv.queueItem.w, fmt.Sprintf("Error marshalling response header: %v", marshalError), 500)
     }
 
     // Respond to the request
-    renderBase.queueItem.w.Header().Set("Content-Type", "image/png")
-    renderBase.queueItem.w.Header().Set(godelbrotHeader, string(responseHeaderPacket))
+    serv.queueItem.w.Header().Set("Content-Type", "image/png")
+    serv.queueItem.w.Header().Set(godelbrotHeader, string(responseHeaderPacket))
 
     // Write image buffer as http response
-    renderBase.queueItem.w.Write(buff.Bytes())
+    serv.queueItem.w.Write(buff.Bytes())
 
     // Notify that rendering is complete
-    renderBase.queueItem.complete <- true
+    serv.queueItem.complete <- true
+}
+
+func (serv webservice) configure(args WebRenderParams) (*lib.Info, error) {
+    req := lib.DefaultRequest()
+    req.RealMin = format(args.RealMin)
+    req.RealMax = format(args.RealMax)
+    req.ImagMin = format(args.ImagMin)
+    req.ImagMax = format(args.ImagMax)
+    req.ImageWidth = args.ImageWidth
+    req.ImageHeight = args.ImageHeight
+
+    userDesc, cerr := lib.Configure(req)
+
+    if cerr != nil {
+        return nil, cerr
+    }
+
+    userDesc.NativeInfo = serv.desc.NativeInfo
+    userDesc.UserRequest = *req
+
+    return userDesc, nil
+}
+
+func format(f float64) string {
+    return strconv.FormatFloat(f, 'e', -1, 64)
 }
