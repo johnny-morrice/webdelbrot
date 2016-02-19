@@ -2,7 +2,7 @@
 
 # Webdelbrot
 
-Web-based mandelbrot viewer based on Godelbrot, the Unix style mandelbrot
+Web-based mandelbrot viewer based on Godelbrot, the Unix-style Mandelbrot
 renderer.
 
 http://github.com/johnny-morrice/godelbrot
