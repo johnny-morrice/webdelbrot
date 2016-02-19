@@ -1,3 +1,5 @@
+![Webdelbrot Mandelbrot Viewer](/webdelbrot.png)
+
 # Webdelbrot
 
 Web-based mandelbrot viewer based on Godelbrot
