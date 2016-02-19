@@ -2,11 +2,13 @@ package main
 
 import (
     "flag"
+    "fmt"
+    "io"
     "log"
     "net/http"
+    "os"
     "path/filepath"
-    "fmt"
-    "runtime"
+    lib "github.com/johnny-morrice/godelbrot/libgodelbrot"
 )
 
 type commandLine struct {
@@ -22,7 +24,7 @@ func parseArguments() commandLine {
     args := commandLine{}
     flag.UintVar(&args.port, "port", 8080, "Port on which to listen")
     flag.StringVar(&args.addr, "addr", "127.0.0.1", "Interface on which to listen")
-    flag.StringVar(&args.static, "static", "static", "Path to static files")
+    flag.StringVar(&args.static, "static", "webdelbrot-static", "Path to static files")
     flag.Parse()
     return args
 }
@@ -30,11 +32,15 @@ func parseArguments() commandLine {
 func main() {
     args := parseArguments()
 
-    // Set number of cores
-    runtime.GOMAXPROCS(runtime.NumCPU())
+    var input io.Reader = os.Stdin
+    desc, readErr := lib.ReadInfo(input)
+
+    if readErr != nil {
+        log.Fatal("Error reading info: ", readErr)
+    }
 
     // Begin the rendering service
-    renderHandler, renderChan := launchRenderService()
+    renderHandler, renderChan := launchRenderService(desc)
     handlers := map[string]func(http.ResponseWriter, *http.Request) {
         "/":                makeIndexHandler(args.static),
         "/service":         renderHandler,
@@ -67,7 +73,6 @@ func main() {
         log.Fatal(httpError)
     }
 
-    // Shut down render service
     renderChan <- renderQueueItem{command: queueStop}
 }
 
