@@ -98,6 +98,7 @@ func (serv webservice) render() {
 
     if len(jsonPacket) == 0 {
         http.Error(serv.queueItem.w, fmt.Sprintf("No data found in parameter '%v'", godelbrotHeader), 400)
+        serv.queueItem.complete <- true
         return
     }
 
@@ -107,6 +108,7 @@ func (serv webservice) render() {
 
     if jsonError != nil {
         http.Error(serv.queueItem.w, fmt.Sprintf("Invalid JSON packet: %v", jsonError), 400)
+        serv.queueItem.complete <- true
         return
     }
 
@@ -114,6 +116,7 @@ func (serv webservice) render() {
 
     if args.ImageWidth == 0 || args.ImageHeight == 0 {
         http.Error(serv.queueItem.w, "ImageHeight and ImageWidth cannot be 0", 422)
+        serv.queueItem.complete <- true
         return
     }
 
@@ -122,6 +125,7 @@ func (serv webservice) render() {
     if cerr != nil {
         msg := fmt.Sprintf("Error in configuration: %v", cerr)
         http.Error(serv.queueItem.w, msg, 400)
+        serv.queueItem.complete <- true
         return
     }
 
@@ -135,8 +139,9 @@ func (serv webservice) render() {
     pngError := png.Encode(&buff, pic)
 
     if pngError != nil {
-        log.Println("Error encoding PNG: ", pngError)
         http.Error(serv.queueItem.w, fmt.Sprintf("Error encoding PNG: %v", pngError), 500)
+        serv.queueItem.complete <- true
+        return
     }
 
     // Craft response
@@ -148,6 +153,8 @@ func (serv webservice) render() {
 
     if marshalError != nil {
         http.Error(serv.queueItem.w, fmt.Sprintf("Error marshalling response header: %v", marshalError), 500)
+        serv.queueItem.complete <- true
+        return
     }
 
     // Respond to the request
