@@ -169,7 +169,7 @@ func (serv webservice) render() {
 }
 
 func (serv webservice) configure(args WebRenderParams) (*lib.Info, error) {
-    req := lib.DefaultRequest()
+    req := &serv.desc.UserRequest
     req.RealMin = format(args.RealMin)
     req.RealMax = format(args.RealMax)
     req.ImagMin = format(args.ImagMin)
