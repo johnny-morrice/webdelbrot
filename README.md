@@ -11,6 +11,10 @@ You will probably also want the static data files
 
 http://github.com/johnny-morrice/webdelbrot-static
 
+## Demo
+
+http://godelbrot.functorama.com
+
 ## Usage
 
 Webdelbrot behaves like other godelbrot tools.  It is configured by sending the output of configbrot to stdin.
