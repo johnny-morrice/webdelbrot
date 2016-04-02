@@ -18,6 +18,8 @@ type commandLine struct {
     port uint
     // Path to directory containing static files
     static string
+    // Number of concurrent render tasks
+    jobs uint
 }
 
 func parseArguments() commandLine {
@@ -25,6 +27,7 @@ func parseArguments() commandLine {
     flag.UintVar(&args.port, "port", 8080, "Port on which to listen")
     flag.StringVar(&args.addr, "addr", "127.0.0.1", "Interface on which to listen")
     flag.StringVar(&args.static, "static", "webdelbrot-static", "Path to static files")
+    flag.UintVar(&args.jobs, "jobs", 1, "Concurrent render tasks")
     flag.Parse()
     return args
 }
@@ -40,11 +43,35 @@ func main() {
     }
 
     // Begin the rendering service
-    renderHandler, renderChan := launchRenderService(desc)
-    handlers := map[string]func(http.ResponseWriter, *http.Request) {
-        "/":                makeIndexHandler(args.static),
-        "/service":         renderHandler,
+    ws := makeWebservice(desc, args.jobs)
+
+    handlers := map[string]func(http.ResponseWriter, *http.Request) {}
+    handlers["/service/image"] = ws.pictureHandler
+    handlers["/service/render"] = ws.renderHandler
+
+    if foundFiles(args) {
+        handleFiles(args.static, handlers)
     }
+
+    for patt, h := range handlers {
+        http.HandleFunc(patt, h)
+    }
+
+    serveAddr := fmt.Sprintf("%v:%v", args.addr, args.port)
+    httpError := http.ListenAndServe(serveAddr, nil)
+
+    if httpError != nil {
+        log.Fatal(httpError)
+    }
+}
+
+func foundFiles(args commandLine) bool {
+    _, err := os.Stat(args.static)
+    return err == nil
+}
+
+func handleFiles(root string, handlers map[string]func(http.ResponseWriter, *http.Request)) {
+    handlers["/"] = makeIndexHandler(root)
 
     staticFiles := map[string]string {
         "style.css": "text/css",
@@ -59,21 +86,8 @@ func main() {
     }
 
     for filename, mime := range staticFiles {
-        handlers["/" + filename] = makeFileHandler(filepath.Join(args.static, filename), mime)
+        handlers["/" + filename] = makeFileHandler(filepath.Join(root, filename), mime)
     }
-
-    for patt, h := range handlers {
-        http.HandleFunc(patt, h)
-    }
-
-    serveAddr := fmt.Sprintf("%v:%v", args.addr, args.port)
-    httpError := http.ListenAndServe(serveAddr, nil)
-
-    if httpError != nil {
-        log.Fatal(httpError)
-    }
-
-    renderChan <- renderQueueItem{command: queueStop}
 }
 
 func makeFileHandler(path string, mime string) func(http.ResponseWriter, *http.Request) {
