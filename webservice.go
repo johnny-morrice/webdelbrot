@@ -1,192 +1,341 @@
 package main
 
 import (
+    "bufio"
     "bytes"
     "encoding/json"
+    "errors"
     "fmt"
-    "image/png"
+    "io"
     "log"
     "net/http"
     "strconv"
     "strings"
+    "time"
+    "github.com/johnny-morrice/godelbrot/process"
     lib "github.com/johnny-morrice/godelbrot/libgodelbrot"
 )
 
-type WebCommand string
-const (
-    render = WebCommand("render")
-    displayImage = WebCommand("displayImage")
-)
-
-type WebRenderParams struct {
-    ImageWidth uint
-    ImageHeight uint
-    RealMin float64
-    RealMax float64
-    ImagMin float64
-    ImagMax float64
+type RenderRequest struct {
+    Req lib.Request
+    Target lib.ZoomTarget
+    WantZoom bool
 }
 
-type GodelbrotPacket struct {
-    Command WebCommand
-    Render WebRenderParams
+func (rr *RenderRequest) validate() error {
+    if rr.Req.ImageWidth < 1 || rr.Req.ImageHeight < 1 {
+        return errors.New("Invalid Req")
+    }
+
+    validerr := rr.Target.Validate();
+    if rr.WantZoom && validerr != nil {
+        return errors.New("Invalid Target")
+    }
+
+    if !rr.WantZoom && validerr == nil {
+        return errors.New("False WantZoom yet valid Target")
+    }
+
+
+    return nil
 }
 
-const godelbrotHeader string = "X-Godelbrot-Packet"
-const godelbrotGetParam string = "godelbrotPacket"
+type RenderResponse struct {
+    NextReq lib.Request
+    ImageURL string
+}
 
-type queueCommand uint
+type PictureRequest struct {
+    Code string
+}
 
-const (
-    queueRender = queueCommand(iota)
-    queueStop = queueCommand(iota)
-)
+const httpheader string = "X-Godelbrot-Packet"
+const formkey string = "godelbrotPacket"
 
-type renderQueueItem struct {
-    command queueCommand
+type session struct {
     w http.ResponseWriter
     req *http.Request
-    complete chan<- bool
 }
 
-func launchRenderService(desc *lib.Info) (func(http.ResponseWriter, *http.Request), chan<- renderQueueItem) {
-    input := make(chan renderQueueItem)
-
-    go handleRenderRequests(desc, input)
-
-    return httpChanWriter(input), input
+func (s session) httpError(msg string, code int) error {
+    http.Error(s.w, msg, code)
+    return errors.New(fmt.Sprintf("(%v) %v", s.req.RemoteAddr, msg))
 }
 
-func httpChanWriter(input chan<- renderQueueItem) func(http.ResponseWriter, *http.Request) {
-    return func (w http.ResponseWriter, req *http.Request) {
-        done := make(chan bool)
-        input <- renderQueueItem{
-            command: queueRender,
-            w: w,
-            req: req,
-            complete: done,
-        }
-        // Block until rendering is complete
-        <- done
+func (s session) internalError() error {
+    return s.httpError("Internal error", 500)
+}
+
+type sem chan bool
+
+func semaphor(concurrent uint) sem {
+    return sem(make(chan bool, concurrent))
+}
+
+func (s sem) acquire(n uint) {
+    for i := uint(0); i < n; i++ {
+        s<- true
     }
+}
+
+func (s sem) release(n uint) {
+    for i := uint(0); i < n; i++ {
+        <-s
+    }
+}
+
+type renderBuffers struct {
+    png bytes.Buffer
+    info bytes.Buffer
+    nextinfo bytes.Buffer
+    report bytes.Buffer
+}
+
+func (rb renderBuffers) logReport() {
+    sc := bufio.NewScanner(&rb.report)
+    for sc.Scan() {
+        err := sc.Err()
+        if err != nil {
+            log.Printf("Error while printing error (omg!): %v", err)
+        }
+        log.Println(sc.Text())
+    }
+}
+
+func (rb renderBuffers) input(info *lib.Info) error {
+    return lib.WriteInfo(&rb.info, info)
+}
+
+// renderService renders fractals
+type renderService struct {
+    s sem
+}
+
+// makeRenderService creates a render service that allows at most `concurrent` concurrent tasks.
+func makeRenderService(concurrent uint) renderService {
+    rs := renderService{}
+    rs.s = semaphor(concurrent)
+    return rs
+}
+
+// render a fractal into the renderBuffers
+func (rs renderService) render(rbuf renderBuffers, zoomArgs []string) error {
+    rs.s.acquire(1)
+    var err error
+    if zoomArgs == nil || len(zoomArgs) == 0 {
+        next, zerr := process.ZoomRender(&rbuf.info, &rbuf.png, &rbuf.report, zoomArgs)
+        err = zerr
+        if zerr != nil {
+            _, err = io.Copy(&rbuf.nextinfo, next)
+        }
+    } else {
+        tee := io.TeeReader(&rbuf.info, &rbuf.nextinfo)
+        err = process.Render(tee, &rbuf.png, &rbuf.report)
+    }
+    rs.s.release(1)
+    return err
+}
+
+type rendering struct {
+    unixTime int64
+    info *lib.Info
+    png []byte
+    code string
+}
+
+func (r rendering) hashcode() string {
+    if r.code == "" {
+        r.code = ""
+    }
+    return r.code
 }
 
 type webservice struct {
-    queueItem renderQueueItem
-    desc *lib.Info
+    baseinfo lib.Info
+    rs renderService
+    cache chan map[string]rendering
 }
 
-func handleRenderRequests(desc *lib.Info, input <-chan renderQueueItem) {
-    serv := webservice{}
-    serv.desc = desc
+func makeWebservice(baseinfo *lib.Info, concurrent uint) *webservice {
+    ws := &webservice{}
+    ws.baseinfo = *baseinfo
+    ws.rs = makeRenderService(concurrent)
+    return ws
+}
 
-    for queue := range input {
-        switch queue.command {
-        case queueRender:
-            serv.queueItem = queue
-            serv.render()
-        case queueStop:
-            break
-        default:
-            panic(fmt.Sprintf("Unknown queueCommand: %v", queue.command))
-        }
+func (ws *webservice) pictureHandler(w http.ResponseWriter, req *http.Request) {
+    sess := session{}
+    sess.w = w
+    sess.req = req
+    err := ws.serveFractal(sess)
+    if err != nil {
+        log.Println(err)
     }
 }
 
-func (serv webservice) render() {
-    jsonPacket := serv.queueItem.req.URL.Query().Get(godelbrotGetParam)
+func (ws *webservice) renderHandler(w http.ResponseWriter, req *http.Request) {
+    sess := session{}
+    sess.w = w
+    sess.req = req
+    resp, err := ws.renderFractal(sess)
+    if err != nil {
+        log.Println(err)
+        return
+    }
+    err = ws.serveInfo(sess, resp)
+    if err != nil {
+        log.Println(err)
+    }
+}
+
+func (ws *webservice) renderFractal(s session) (*RenderResponse, error) {
+    jsonPacket := s.req.FormValue(formkey)
 
     if len(jsonPacket) == 0 {
-        http.Error(serv.queueItem.w, fmt.Sprintf("No data found in parameter '%v'", godelbrotHeader), 400)
-        serv.queueItem.complete <- true
-        return
+        err := s.httpError(fmt.Sprintf("No data found in parameter '%v'", formkey), 400)
+        return nil, err
     }
 
     dec := json.NewDecoder(strings.NewReader(jsonPacket))
-    userPacket := GodelbrotPacket{}
-    jsonError := dec.Decode(&userPacket)
+    renreq := &RenderRequest{}
+    jsonerr := dec.Decode(renreq)
 
-    if jsonError != nil {
-        http.Error(serv.queueItem.w, fmt.Sprintf("Invalid JSON packet: %v", jsonError), 400)
-        serv.queueItem.complete <- true
-        return
+    if jsonerr != nil {
+        err := s.httpError(fmt.Sprintf("Invalid JSON"), 400)
+        log.Println(err)
+        return nil, jsonerr
     }
 
-    args := userPacket.Render
-
-    if args.ImageWidth == 0 || args.ImageHeight == 0 {
-        http.Error(serv.queueItem.w, "ImageHeight and ImageWidth cannot be 0", 422)
-        serv.queueItem.complete <- true
-        return
+    validerr := renreq.validate()
+    if validerr != nil {
+        err := s.httpError(fmt.Sprintf("Invalid render request: %v", validerr), 400)
+        log.Println(err)
+        return nil, validerr
     }
 
-    desc, cerr := serv.configure(args)
+    ws.safeTarget(renreq)
+    info := ws.mergeInfo(renreq)
 
-    if cerr != nil {
-        msg := fmt.Sprintf("Error in configuration: %v", cerr)
-        http.Error(serv.queueItem.w, msg, 400)
-        serv.queueItem.complete <- true
-        return
+    buffs := renderBuffers{}
+    bufferr := buffs.input(info)
+    if bufferr != nil {
+        err := s.internalError()
+        log.Println(err)
+        return nil, bufferr
     }
 
-    pic, renderError := lib.Render(desc)
+    var zoomArgs []string
+    if renreq.WantZoom {
+        zoomArgs = process.ZoomArgs(renreq.Target)
+    }
+    renderErr := ws.rs.render(buffs, zoomArgs)
 
-    if renderError != nil {
-        log.Fatal(fmt.Sprintf("Render error: %v", renderError))
+    // Copy any stderr messages
+    buffs.logReport()
+
+    if renderErr != nil {
+        err := s.internalError()
+        log.Println(err)
+        return nil, renderErr
     }
 
-    buff := bytes.Buffer{}
-    pngError := png.Encode(&buff, pic)
-
-    if pngError != nil {
-        http.Error(serv.queueItem.w, fmt.Sprintf("Error encoding PNG: %v", pngError), 500)
-        serv.queueItem.complete <- true
-        return
+    nextinfo, infoerr := lib.ReadInfo(&buffs.nextinfo)
+    if infoerr != nil {
+        err := s.internalError()
+        log.Println(err)
+        return nil, infoerr
     }
 
-    // Craft response
-    responsePacket := GodelbrotPacket{
-        Command: displayImage,
-    }
+    rndr := rendering{}
+    rndr.png = buffs.png.Bytes()
+    rndr.info = info
+    rndr.unixTime = time.Now().Unix()
+    code := rndr.hashcode()
 
-    responseHeaderPacket, marshalError := json.Marshal(responsePacket)
+    imgcache := <-ws.cache
+    imgcache[code] = rndr
+    ws.cache<- imgcache
 
-    if marshalError != nil {
-        http.Error(serv.queueItem.w, fmt.Sprintf("Error marshalling response header: %v", marshalError), 500)
-        serv.queueItem.complete <- true
-        return
-    }
+    resp := &RenderResponse{}
+    resp.ImageURL = fmt.Sprintf("/image/%v", code)
+    resp.NextReq = nextinfo.UserRequest
 
-    // Respond to the request
-    serv.queueItem.w.Header().Set("Content-Type", "image/png")
-    serv.queueItem.w.Header().Set(godelbrotHeader, string(responseHeaderPacket))
-
-    // Write image buffer as http response
-    serv.queueItem.w.Write(buff.Bytes())
-
-    // Notify that rendering is complete
-    serv.queueItem.complete <- true
+    return resp, nil
 }
 
-func (serv webservice) configure(args WebRenderParams) (*lib.Info, error) {
-    req := &serv.desc.UserRequest
-    req.RealMin = format(args.RealMin)
-    req.RealMax = format(args.RealMax)
-    req.ImagMin = format(args.ImagMin)
-    req.ImagMax = format(args.ImagMax)
-    req.ImageWidth = args.ImageWidth
-    req.ImageHeight = args.ImageHeight
+func (ws *webservice) serveInfo(s session, resp *RenderResponse) error {
+    s.w.Header().Set("Content-Type", "application/json")
+    enc := json.NewEncoder(s.w)
+    jsonErr := enc.Encode(resp)
+    if jsonErr != nil {
+        err := s.internalError()
+        log.Println(err)
+        return jsonErr
+    }
+    return nil
+}
 
-    userDesc, cerr := lib.Configure(req)
+func (ws *webservice) serveFractal(s session) error {
+    formval := s.req.FormValue(formkey)
+    picreq := &PictureRequest{}
+    dec := json.NewDecoder(strings.NewReader(formval))
+    jsonerr := dec.Decode(picreq)
 
-    if cerr != nil {
-        return nil, cerr
+    if jsonerr != nil {
+        err := s.internalError()
+        log.Println(err)
+        return jsonerr
     }
 
-    userDesc.NativeInfo = serv.desc.NativeInfo
-    userDesc.UserRequest = *req
+    if picreq.Code == "" {
+        err := s.httpError("No Code", 400)
+        return err
+    }
 
-    return userDesc, nil
+    imgcache := <-ws.cache
+    ws.cache<- imgcache
+    rndr, ok := imgcache[picreq.Code]
+
+    if !ok {
+        err := s.httpError(fmt.Sprintf("Invalid Code: %v", picreq.Code), 400)
+        return err
+    }
+
+    buff := bytes.NewBuffer(rndr.png)
+    // Write image buffer as http response
+    s.w.Header().Set("Content-Type", "image/png")
+    _, cpyerr := io.Copy(s.w, buff)
+    if cpyerr != nil {
+        err := s.internalError()
+        log.Println(err)
+        return cpyerr
+    }
+
+    return nil
+}
+
+// Only allow zoom reconfiguration if autodetection is enabled throughout the base info.
+func (ws *webservice) safeTarget(renreq *RenderRequest) {
+    req := ws.baseinfo.UserRequest
+    dyn := req.Renderer == lib.AutoDetectRenderMode
+    dyn = dyn && req.Numerics == lib.AutoDetectNumericsMode
+
+    renreq.Target.UpPrec = dyn
+    renreq.Target.Reconfigure = dyn
+    renreq.Target.Frames = 1
+}
+
+func (ws *webservice) mergeInfo(renreq *RenderRequest) *lib.Info {
+    req := ws.baseinfo.UserRequest
+
+    req.ImageWidth = renreq.Req.ImageWidth
+    req.ImageHeight = renreq.Req.ImageHeight
+
+    inf := new(lib.Info)
+    *inf = ws.baseinfo
+    inf.UserRequest = req
+
+    return inf
 }
 
 func format(f float64) string {
