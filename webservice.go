@@ -1,7 +1,6 @@
 package main
 
 import (
-    "bufio"
     "bytes"
     "encoding/json"
     "errors"
@@ -11,10 +10,11 @@ import (
     "net/http"
     "strconv"
     "strings"
-    "time"
-    "github.com/johnny-morrice/godelbrot/process"
+    "github.com/gorilla/mux"
     lib "github.com/johnny-morrice/godelbrot/libgodelbrot"
 )
+
+const formkey = "godelbrot-packet"
 
 type RenderRequest struct {
     Req lib.Request
@@ -40,21 +40,27 @@ func (rr *RenderRequest) validate() error {
     return nil
 }
 
-type RenderResponse struct {
+type RQNewResp struct {
+    RQStatusUrl string
+}
+
+type RQStatusResp struct {
+    CreateTime int64
+    CompleteTime int64
+    State string
+    Error string
     NextReq lib.Request
     ImageURL string
 }
 
-type PictureRequest struct {
-    Code string
-}
-
-const httpheader string = "X-Godelbrot-Packet"
-const formkey string = "godelbrotPacket"
-
 type session struct {
     w http.ResponseWriter
     req *http.Request
+}
+
+func (s session) getMuxVar(field string) string {
+    mvars := mux.Vars(s.req)
+    return mvars[field]
 }
 
 func (s session) httpError(msg string, code int) error {
@@ -66,134 +72,93 @@ func (s session) internalError() error {
     return s.httpError("Internal error", 500)
 }
 
-type sem chan bool
-
-func semaphor(concurrent uint) sem {
-    return sem(make(chan bool, concurrent))
-}
-
-func (s sem) acquire(n uint) {
-    for i := uint(0); i < n; i++ {
-        s<- true
+func (s session) serveJson(any interface{}) error {
+    s.w.Header().Set("Content-Type", "application/json")
+    enc := json.NewEncoder(s.w)
+    jsonErr := enc.Encode(any)
+    if jsonErr != nil {
+        err := s.internalError()
+        log.Println(err)
+        return jsonErr
     }
-}
-
-func (s sem) release(n uint) {
-    for i := uint(0); i < n; i++ {
-        <-s
-    }
-}
-
-type renderBuffers struct {
-    png bytes.Buffer
-    info bytes.Buffer
-    nextinfo bytes.Buffer
-    report bytes.Buffer
-}
-
-func (rb renderBuffers) logReport() {
-    sc := bufio.NewScanner(&rb.report)
-    for sc.Scan() {
-        err := sc.Err()
-        if err != nil {
-            log.Printf("Error while printing error (omg!): %v", err)
-        }
-        log.Println(sc.Text())
-    }
-}
-
-func (rb renderBuffers) input(info *lib.Info) error {
-    return lib.WriteInfo(&rb.info, info)
-}
-
-// renderService renders fractals
-type renderService struct {
-    s sem
-}
-
-// makeRenderService creates a render service that allows at most `concurrent` concurrent tasks.
-func makeRenderService(concurrent uint) renderService {
-    rs := renderService{}
-    rs.s = semaphor(concurrent)
-    return rs
-}
-
-// render a fractal into the renderBuffers
-func (rs renderService) render(rbuf renderBuffers, zoomArgs []string) error {
-    rs.s.acquire(1)
-    var err error
-    if zoomArgs == nil || len(zoomArgs) == 0 {
-        next, zerr := process.ZoomRender(&rbuf.info, &rbuf.png, &rbuf.report, zoomArgs)
-        err = zerr
-        if zerr != nil {
-            _, err = io.Copy(&rbuf.nextinfo, next)
-        }
-    } else {
-        tee := io.TeeReader(&rbuf.info, &rbuf.nextinfo)
-        err = process.Render(tee, &rbuf.png, &rbuf.report)
-    }
-    rs.s.release(1)
-    return err
-}
-
-type rendering struct {
-    unixTime int64
-    info *lib.Info
-    png []byte
-    code string
-}
-
-func (r rendering) hashcode() string {
-    if r.code == "" {
-        r.code = ""
-    }
-    return r.code
+    return nil
 }
 
 type webservice struct {
     baseinfo lib.Info
-    rs renderService
-    cache chan map[string]rendering
+    rq renderqueue
+    prefix string
 }
 
-func makeWebservice(baseinfo *lib.Info, concurrent uint) *webservice {
+func makeWebservice(baseinfo *lib.Info, concurrent uint, prefix string) *mux.Router {
     ws := &webservice{}
     ws.baseinfo = *baseinfo
-    ws.rs = makeRenderService(concurrent)
-    return ws
+    ws.prefix = prefix
+
+    ws.rq = makeRenderQueue(concurrent)
+
+    r := mux.NewRouter()
+    r.HandleFunc("/renderqueue", ws.enterRQHandler)
+    r.HandleFunc("/renderqueue/{rqcode}/", ws.getRQHandler)
+    r.HandleFunc("/image/{rqcode}/", ws.getImageHandler)
+    return r
 }
 
-func (ws *webservice) pictureHandler(w http.ResponseWriter, req *http.Request) {
-    sess := session{}
-    sess.w = w
-    sess.req = req
-    err := ws.serveFractal(sess)
-    if err != nil {
-        log.Println(err)
-    }
+func (ws *webservice) getImageHandler(w http.ResponseWriter, req *http.Request) {
+    withSession(w, req, ws.getImage)
 }
 
-func (ws *webservice) renderHandler(w http.ResponseWriter, req *http.Request) {
-    sess := session{}
-    sess.w = w
-    sess.req = req
-    resp, err := ws.renderFractal(sess)
-    if err != nil {
-        log.Println(err)
-        return
-    }
-    err = ws.serveInfo(sess, resp)
-    if err != nil {
-        log.Println(err)
-    }
+func (ws *webservice) enterRQHandler(w http.ResponseWriter, req *http.Request) {
+    withSession(w, req, ws.enterRQ)
 }
 
-func (ws *webservice) renderFractal(s session) (*RenderResponse, error) {
+func (ws *webservice) getRQHandler(w http.ResponseWriter, req *http.Request) {
+    withSession(w, req, ws.getRQ)
+}
+
+func (ws *webservice) getRQ(s session) error {
+    input := s.getMuxVar("rqcode")
+    rqcode := hashcode(input)
+    any, ok := ws.rq.ca.get(rqcode)
+
+    if !ok {
+        err := s.httpError(fmt.Sprintf("Invalid code: %v", rqcode), 400)
+        return err
+    }
+
+    rqi, castok := any.(*rqitem)
+    if !castok {
+        panic(fmt.Sprintf("Expected type rqitem but received: %v", any))
+    }
+
+    resp := &RQStatusResp{}
+    resp.CreateTime = rqi.createtime.Unix()
+
+    switch rqi.state {
+    case DONE:
+        resp.State = "done"
+        resp.CompleteTime = rqi.completetime.Unix()
+        resp.NextReq = rqi.packet.info.UserRequest
+        resp.ImageURL = fmt.Sprintf("%v/image/%v/", ws.prefix, rqi.hash())
+    case ERROR:
+        resp.State = "error"
+        resp.CompleteTime = rqi.completetime.Unix()
+        resp.Error = rqi.err
+    case WAIT:
+        resp.State = "wait"
+    default:
+        panic(fmt.Sprintf("Unknown state: %v", rqi.state))
+    }
+
+    return s.serveJson(resp)
+}
+
+func (ws *webservice) enterRQ(s session) error {
     jsonPacket := s.req.FormValue(formkey)
 
     if len(jsonPacket) == 0 {
         err := s.httpError(fmt.Sprintf("No data found in parameter '%v'", formkey), 400)
-        return nil, err
+        return err
     }
 
     dec := json.NewDecoder(strings.NewReader(jsonPacket))
@@ -203,105 +168,44 @@ func (ws *webservice) renderFractal(s session) (*RenderResponse, error) {
     if jsonerr != nil {
         err := s.httpError(fmt.Sprintf("Invalid JSON"), 400)
         log.Println(err)
-        return nil, jsonerr
+        return jsonerr
     }
 
     validerr := renreq.validate()
     if validerr != nil {
         err := s.httpError(fmt.Sprintf("Invalid render request: %v", validerr), 400)
         log.Println(err)
-        return nil, validerr
+        return validerr
     }
 
+    // Defaults overwrite where appropriate (security concern)
     ws.safeTarget(renreq)
     info := ws.mergeInfo(renreq)
 
-    buffs := renderBuffers{}
-    bufferr := buffs.input(info)
-    if bufferr != nil {
-        err := s.internalError()
-        log.Println(err)
-        return nil, bufferr
-    }
+    pkt := &renderpacket{}
+    pkt.wantzoom = renreq.WantZoom
+    pkt.info = *info
+    pkt.target = renreq.Target
 
-    var zoomArgs []string
-    if renreq.WantZoom {
-        zoomArgs = process.ZoomArgs(renreq.Target)
-    }
-    renderErr := ws.rs.render(buffs, zoomArgs)
-
-    // Copy any stderr messages
-    buffs.logReport()
-
-    if renderErr != nil {
-        err := s.internalError()
-        log.Println(err)
-        return nil, renderErr
-    }
-
-    nextinfo, infoerr := lib.ReadInfo(&buffs.nextinfo)
-    if infoerr != nil {
-        err := s.internalError()
-        log.Println(err)
-        return nil, infoerr
-    }
-
-    rndr := rendering{}
-    rndr.png = buffs.png.Bytes()
-    rndr.info = info
-    rndr.unixTime = time.Now().Unix()
-    code := rndr.hashcode()
-
-    imgcache := <-ws.cache
-    imgcache[code] = rndr
-    ws.cache<- imgcache
-
-    resp := &RenderResponse{}
-    resp.ImageURL = fmt.Sprintf("/image/%v", code)
-    resp.NextReq = nextinfo.UserRequest
-
-    return resp, nil
+    code := ws.rq.enqueue(pkt)
+    resp := &RQNewResp{}
+    resp.RQStatusUrl = fmt.Sprintf("%v/renderqueue/%v/", ws.prefix, code)
+    return s.serveJson(resp)
 }
 
-func (ws *webservice) serveInfo(s session, resp *RenderResponse) error {
-    s.w.Header().Set("Content-Type", "application/json")
-    enc := json.NewEncoder(s.w)
-    jsonErr := enc.Encode(resp)
-    if jsonErr != nil {
-        err := s.internalError()
-        log.Println(err)
-        return jsonErr
-    }
-    return nil
-}
 
-func (ws *webservice) serveFractal(s session) error {
-    formval := s.req.FormValue(formkey)
-    picreq := &PictureRequest{}
-    dec := json.NewDecoder(strings.NewReader(formval))
-    jsonerr := dec.Decode(picreq)
+func (ws *webservice) getImage(s session) error {
+    input := s.getMuxVar("rqcode")
+    rqcode := hashcode(input)
 
-    if jsonerr != nil {
-        err := s.internalError()
-        log.Println(err)
-        return jsonerr
-    }
-
-    if picreq.Code == "" {
-        err := s.httpError("No Code", 400)
-        return err
-    }
-
-    imgcache := <-ws.cache
-    ws.cache<- imgcache
-    rndr, ok := imgcache[picreq.Code]
+    png, ok := ws.rq.ic.get(rqcode)
 
     if !ok {
-        err := s.httpError(fmt.Sprintf("Invalid Code: %v", picreq.Code), 400)
+        err := s.httpError(fmt.Sprintf("Invalid Code: %v", rqcode), 400)
         return err
     }
 
-    buff := bytes.NewBuffer(rndr.png)
+    buff := bytes.NewBuffer(png)
     // Write image buffer as http response
     s.w.Header().Set("Content-Type", "image/png")
     _, cpyerr := io.Copy(s.w, buff)
@@ -312,6 +216,16 @@ func (ws *webservice) serveFractal(s session) error {
     }
 
     return nil
+}
+
+func withSession(w http.ResponseWriter, req *http.Request, handler func (session) error) {
+    sess := session{}
+    sess.w = w
+    sess.req = req
+    err := handler(sess)
+    if err != nil {
+        log.Println(err)
+    }
 }
 
 // Only allow zoom reconfiguration if autodetection is enabled throughout the base info.

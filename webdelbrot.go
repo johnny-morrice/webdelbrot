@@ -25,7 +25,7 @@ type commandLine struct {
 func parseArguments() commandLine {
     args := commandLine{}
     flag.UintVar(&args.port, "port", 8080, "Port on which to listen")
-    flag.StringVar(&args.addr, "addr", "127.0.0.1", "Interface on which to listen")
+    flag.StringVar(&args.addr, "bind", "127.0.0.1", "Interface on which to listen")
     flag.StringVar(&args.static, "static", "webdelbrot-static", "Path to static files")
     flag.UintVar(&args.jobs, "jobs", 1, "Concurrent render tasks")
     flag.Parse()
@@ -36,27 +36,24 @@ func main() {
     args := parseArguments()
 
     var input io.Reader = os.Stdin
-    desc, readErr := lib.ReadInfo(input)
-
+    baseinfo, readErr := lib.ReadInfo(input)
     if readErr != nil {
         log.Fatal("Error reading info: ", readErr)
     }
 
-    // Begin the rendering service
-    ws := makeWebservice(desc, args.jobs)
-
-    handlers := map[string]func(http.ResponseWriter, *http.Request) {}
-    handlers["/service/image"] = ws.pictureHandler
-    handlers["/service/render"] = ws.renderHandler
-
-    if foundFiles(args) {
-        handleFiles(args.static, handlers)
+    if !foundFiles(args) {
+        log.Fatal("Could not find files at: %v", args.static)
     }
 
-    for patt, h := range handlers {
-        http.HandleFunc(patt, h)
-    }
+    // Handle fractal requests
+    const prefix = "/service"
+    router := makeWebservice(baseinfo, args.jobs, prefix)
+    http.Handle(prefix, router)
 
+    // Handle static files
+    handleFiles(args.static)
+
+    // Run webserver
     serveAddr := fmt.Sprintf("%v:%v", args.addr, args.port)
     httpError := http.ListenAndServe(serveAddr, nil)
 
@@ -70,8 +67,8 @@ func foundFiles(args commandLine) bool {
     return err == nil
 }
 
-func handleFiles(root string, handlers map[string]func(http.ResponseWriter, *http.Request)) {
-    handlers["/"] = makeIndexHandler(root)
+func handleFiles(root string) {
+    http.HandleFunc("/", makeIndexHandler(root))
 
     staticFiles := map[string]string {
         "style.css": "text/css",
@@ -86,7 +83,8 @@ func handleFiles(root string, handlers map[string]func(http.ResponseWriter, *htt
     }
 
     for filename, mime := range staticFiles {
-        handlers["/" + filename] = makeFileHandler(filepath.Join(root, filename), mime)
+        path := filepath.Join(root, filename)
+        http.HandleFunc(path, makeFileHandler(path, mime))
     }
 }
 
