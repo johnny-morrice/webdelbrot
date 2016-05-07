@@ -1,88 +1,63 @@
 package main
 
 import (
-    "flag"
     "fmt"
     "io"
-    "log"
-    "net/http"
-    "os"
-    "path/filepath"
-    lib "github.com/johnny-morrice/godelbrot/libgodelbrot"
+
+    "github/johnny-morrice/godelbrot/config"
+    "github/johnny-morrice/godelbrot/restclient"
+
+    "github.com/gopherjs/gopherjs/js"
 )
 
-type commandLine struct {
-    // Your IP address describes the interface on which we serve
-    addr string
-    // The port we are to serve upon
-    port uint
-    // Path to directory containing static files
-    static string
-}
-
-func parseArguments() commandLine {
-    args := commandLine{}
-    flag.UintVar(&args.port, "port", 8080, "Port on which to listen")
-    flag.StringVar(&args.addr, "addr", "127.0.0.1", "Interface on which to listen")
-    flag.StringVar(&args.static, "static", "webdelbrot-static", "Path to static files")
-    flag.Parse()
-    return args
-}
-
 func main() {
-    args := parseArguments()
+    bindings := map[string]interface{}
+    bindings["window_resize"] = js_window_resize
+    bindings["fractal_click_zoom"] = js_fractal_click_zoom
+    bindings["fractal_click_cancel"] = js_fractal_click_cancel
+    bindings["fractal_mousemove"] = js_fractal_mousemove
+    bindings["toolbar_restart_click"] = js_toolbar_restart_click
+    bindings["toolbar_back_click"] = js_toolbar_back_click
 
-    var input io.Reader = os.Stdin
-    desc, readErr := lib.ReadInfo(input)
-
-    if readErr != nil {
-        log.Fatal("Error reading info: ", readErr)
-    }
-
-    // Begin the rendering service
-    renderHandler, renderChan := launchRenderService(desc)
-    handlers := map[string]func(http.ResponseWriter, *http.Request) {
-        "/":                makeIndexHandler(args.static),
-        "/service":         renderHandler,
-    }
-
-    staticFiles := map[string]string {
-        "style.css": "text/css",
-        "godelbrot.js": "application/javascript",
-        "history.js": "application/javascript",
-        "mandelbrot.js": "application/javascript",
-        "complex.js": "application/javascript",
-        "image.js": "application/javascript",
-        "zoom.js": "application/javascript",
-        "favicon.ico": "image/x-icon",
-        "small-logo.png": "image.png",
-    }
-
-    for filename, mime := range staticFiles {
-        handlers["/" + filename] = makeFileHandler(filepath.Join(args.static, filename), mime)
-    }
-
-    for patt, h := range handlers {
-        http.HandleFunc(patt, h)
-    }
-
-    serveAddr := fmt.Sprintf("%v:%v", args.addr, args.port)
-    httpError := http.ListenAndServe(serveAddr, nil)
-
-    if httpError != nil {
-        log.Fatal(httpError)
-    }
-
-    renderChan <- renderQueueItem{command: queueStop}
+    js.Global.Set("godel", bindings)
 }
 
-func makeFileHandler(path string, mime string) func(http.ResponseWriter, *http.Request) {
-    return func (w http.ResponseWriter, req *http.Request) {
-        w.Header().Set("Content-Type", mime)
-        http.ServeFile(w, req, path)
-    }
+func js_fractal_click_zoom(event *js.Object) bool {
+    x, y := mousepos(event)
+    getfractal().zoom(x, y)
+    return false
 }
 
-func makeIndexHandler(static string) func(http.ResponseWriter, *http.Request) {
-    return makeFileHandler(filepath.Join(static, "index.html"), "text/html")
+func js_fractal_mousemove(event *js.Object) bool {
+    x, y := mousepos(event)
+    getfractal().inspect(x, y)
+    return false
+}
+
+func js_fractal_click_cancel(event *js.Object) bool {
+    getfractal().cancel()
+    return false
+}
+
+func mousepos(event *js.Object) (uint, uint) {
+    keys := []string{"x", "y"}
+    vals := make([]int, len(keys))
+    for i, k := range keys {
+        vals[i] = event.Key(k).Uint()
+    }
+    return vals[0], vals[1]
+}
+
+func js_window_resize() {
+    gethistory().last().resize()
+}
+
+func js_toolbar_restart_click() bool {
+    gethistory().restart()
+    return false
+}
+
+func js_toolbar_back_click() bool {
+    gethistory().back()
+    return false
 }

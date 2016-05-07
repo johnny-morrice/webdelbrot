@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Godelbrot fractal explorer</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="webdelbrot.js"></script>
+  </head>
+  <body onresize="godel.window_resize();">
+    <img class="center" id="fractal" src=""
+      onclick="godel.fractal_click_zoom(event);" oncontextmenu="godel.fractal_click_cancel();" onmousemove="godel.fractal_mousemove(event);"
+      alt="Mandelbrot set">
+    <div id="toolbar">
+        <img class="logo" src="small-logo.png" alt="Godelbrot logo">
+        <span>Godelbrot fractal explorer</span> |
+        <a class="control" href="" onclick="return godel.toolbar_restart_click();">restart</a>
+        <a class="control" href="" onclick="return godel.toolbar_back_click();">back</a>
+        <span class="feedback" id="status"></span>
+    </div>
+  </body>
+</html>
