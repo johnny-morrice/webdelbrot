@@ -8,7 +8,7 @@
   </head>
   <body onload="godel.Redraw();"; onresize="godel.Window_resize();">
     <img class="center" id="fractal" src=""
-      onmousedown="godel.Fractal_mousedown(event);" onmouseup="godel.Fractal_mouseup(event);" oncontextmenu="godel.Fractal_click_cancel();" onmousemove="godel.Fractal_mousemove(event);"
+      onmousedown="return godel.Fractal_mousedown(event);" onmouseup="return godel.Fractal_mouseup(event);" oncontextmenu="return godel.Fractal_contextmenu();" onmousemove="godel.Fractal_mousemove(event)"
       alt="Mandelbrot set">
     <div id="toolbar">
         <img class="logo" src="small-logo.png" alt="Godelbrot logo">

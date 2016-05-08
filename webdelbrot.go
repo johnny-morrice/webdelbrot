@@ -1,7 +1,9 @@
 package main
 
 import (
-     "github.com/gopherjs/gopherjs/js"
+    "log"
+
+    "github.com/gopherjs/gopherjs/js"
 )
 
 func main() {
@@ -10,7 +12,7 @@ func main() {
 }
 
 func newgodel() *Godel {
-    const batchlength = 100
+    const batchlength = 300
     godel := &Godel{}
     godel.debounce = newdebounce(batchlength)
     return godel
@@ -36,8 +38,21 @@ func (godel *Godel) Fractal_mousemove(event *js.Object) bool {
     return false
 }
 
-func (godel *Godel) Fractal_click_cancel(event *js.Object) bool {
-    getfractal().cancel()
+func (godel *Godel) Fractal_contextmenu(event *js.Object) bool {
+    return false
+}
+
+func (godel *Godel) Fractal_mouseup(event *js.Object) bool {
+    switch button := event.Get("button").Uint64(); button {
+    case 0:
+        getfractal().mark()
+    case 2:
+        getfractal().cancel()        
+    default:
+        if __DEBUG {
+            log.Printf("Not handling mouse button %v", button)    
+        }
+    }
     return false
 }
 
