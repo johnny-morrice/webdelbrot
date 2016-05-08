@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
     "github.com/gopherjs/gopherjs/js"
 )
 
@@ -17,7 +19,7 @@ func getfractal() *fractal {
 	const toolbarId = "toolbar"
     if __fractal == nil {
     	__fractal = &fractal{}
-    	__fractal.fractal = getelementbyid(fractalId);
+    	__fractal.fractal = getelementbyid(fractalId)
     	__fractal.toolbar = getelementbyid(toolbarId)
     	__fractal.window = js.Global.Get("window")
     }
@@ -53,7 +55,11 @@ func (fr *fractal) defaultrendercmd() *rendercmd {
 }
 
 func (fr *fractal) replace(pic *img) {
-	fr.fractal.Call("setAttribute", "href", pic.uri())
+	w, h := fr.dims()
+	style := fr.fractal.Get("style")
+	style.Set("background-image", pic.cssurl())
+	style.Set("width", fmt.Sprintf("%vpx", w))
+	style.Set("height", fmt.Sprintf("%vpx", h))
 }
 
 func getelementbyid(id string) *js.Object {

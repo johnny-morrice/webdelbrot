@@ -45,3 +45,11 @@ func (pic *img) uri() string {
 		return pic.url
 	}
 }
+
+func (pic *img) cssurl() string {
+	if pic.url == "" {
+		return fmt.Sprintf("url(\"%v\")", pic.uri())
+	} else {
+		return pic.url
+	}
+}
