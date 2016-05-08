@@ -1,20 +1,29 @@
-package webdelbrot
+package main
 
 import (
-    "github.com/johnny-morrice/godelbrot/restclient"
+    "io"
 
-    http "github.com/johnny-morrice/godelbrot/gopherjs-net-http"
+    "net/http"
+
+    "github.com/johnny-morrice/godelbrot/restclient"
 )
 
 func defaultconfig() restclient.Config {
-
+    config := restclient.Config{}
+    config.Addr = __ADDR
+    config.Port = __PORT
+    config.Prefix = __PREFIX
+    config.Ticktime = __TICKTIME
+    config.Debug = __DEBUG
+    config.Http = (*goHttp)(&http.Client{})
+    return config
 }
 
+var __restclient *restclient.Client
 func getclient() *restclient.Client {
     if __restclient == nil {
         config := defaultconfig()
-        config.Http = goHttp(*http.Client{})
-        __restclient.New(config)
+        __restclient = restclient.New(config)
     }
 
     return __restclient
