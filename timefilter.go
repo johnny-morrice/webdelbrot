@@ -18,7 +18,7 @@ type filterbatch struct {
 
 func newdebounce(length uint) *debouncer {
     tf := &debouncer{}
-    tf.length = time.Duration(length)
+    tf.length = time.Duration(length) * time.Millisecond
     tf.batch = &filterbatch{}
     return tf
 }
@@ -26,12 +26,14 @@ func newdebounce(length uint) *debouncer {
 // Do f only once for a batch of time-close invocations.
 func (tf *debouncer) do(f func ()) {
     tf.wait()
-    tf.once(f)
+    go func () {
+        tf.once(f)
+    }()
 }
 
     // once executes the function exactly once per batch.
 func (tf *debouncer) once(f func ()) {
-    tf.batch.wg.Done()
+    tf.batch.wg.Wait()
 
     tf.mut.Lock()
     batch := tf.batch
