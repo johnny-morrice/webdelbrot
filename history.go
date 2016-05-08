@@ -13,7 +13,7 @@ var __history *history
 func gethistory() *history {
     if __history == nil {
     	__history = &history{}
-    	__history.frames = []*rendercmd{defaultrendercmd()}
+    	__history.frames = []*rendercmd{getfractal().defaultrendercmd()}
     }
 
     return __history

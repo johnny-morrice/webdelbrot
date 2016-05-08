@@ -5,16 +5,21 @@ import (
 )
 
 type fractal struct {
-	element *js.Object
+	fractal *js.Object
+	toolbar *js.Object
+	window *js.Object
 }
 
 var __fractal *fractal
 
 func getfractal() *fractal {
-	const elementID = "fractal"
+	const fractalId = "fractal"
+	const toolbarId = "toolbar"
     if __fractal == nil {
     	__fractal = &fractal{}
-    	__fractal.element = js.Global.Get("document").Call("getElementById", elementID);
+    	__fractal.fractal = getelementbyid(fractalId);
+    	__fractal.toolbar = getelementbyid(toolbarId)
+    	__fractal.window = js.Global.Get("window")
     }
 
     return __fractal
@@ -32,12 +37,33 @@ func (fr *fractal) cancel() {
 
 }
 
-func (fr *fractal) dims() (uint64, uint64) {
-	w := fr.element.Call("getAttribute", "width")
-	h := fr.element.Call("getAttribute", "height")
-	return w.Uint64(), h.Uint64()
+func (fr *fractal) dims() (uint, uint) {
+	w := fr.window.Get("innerWidth").Uint64()
+	wh := fr.window.Get("innerHeight").Uint64()
+	toolh := fr.toolbar.Call("getAttribute", "height").Uint64()
+	h := wh - toolh
+	return cropu64(w), cropu64(h)
+}
+
+func (fr *fractal) defaultrendercmd() *rendercmd {
+	cmd := &rendercmd{}
+	req := &cmd.renreq.Req
+	req.ImageWidth, req.ImageHeight = fr.dims()
+	return cmd
 }
 
 func (fr *fractal) replace(pic *img) {
-	fr.element.Call("setAttribute", pic.uri())
+	fr.fractal.Call("setAttribute", "href", pic.uri())
+}
+
+func getelementbyid(id string) *js.Object {
+	return js.Global.Get("document").Call("getElementById", id)
+}
+
+func cropu64(n uint64) uint {
+	const maxuint = uint64(^uint(0))
+	if n > maxuint {
+		panic("Unsigned integer overflow")
+	}
+	return uint(n)
 }

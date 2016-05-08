@@ -1,9 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
-	"io/ioutil"
 
 	"github.com/johnny-morrice/godelbrot/rest/protocol"
 )
@@ -13,34 +14,22 @@ type rendercmd struct {
 	renreq protocol.RenderRequest
 }
 
-func defaultrendercmd() *rendercmd {
-	cmd := &rendercmd{}
-	w, h := getfractal().dims()
-	cmd.renreq.Req.ImageWidth = cropu64(w)
-	cmd.renreq.Req.ImageHeight = cropu64(h)
-	return cmd
-}
-
 func (cmd *rendercmd) render() (*img, error) {
 	rest := getclient()
-	datach := make(chan io.Reader)
-	errch := make(chan error)
-	go func() {
-		data, err := rest.Cycle(cmd.parent, &cmd.renreq)
-		errch <- err
-		datach<- data
-	}()
-	if err := <-errch; err != nil {
-		return nil, err
-	}
-
-	bytes, err := ioutil.ReadAll(<-datach)
+	png, err := rest.Cycle(cmd.parent, &cmd.renreq)
 	if err != nil {
 		return nil, err
 	}
 
+	b64 := &bytes.Buffer{}
+	enc := base64.NewEncoder(base64.StdEncoding, b64)
+	_, encerr := io.Copy(enc, png)
+	if encerr != nil {
+		return nil, encerr
+	}
+
 	pic := &img{}
-	pic.data = bytes
+	pic.data = b64.Bytes()
 	return pic, nil
 }
 
@@ -55,12 +44,4 @@ func (pic *img) uri() string {
 	} else {
 		return pic.url
 	}
-}
-
-func cropu64(n uint64) uint {
-	const maxuint = uint64(^uint(0))
-	if n > maxuint {
-		panic("Unsigned integer overflow")
-	}
-	return uint(n)
 }
