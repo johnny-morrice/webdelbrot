@@ -31,6 +31,11 @@ func (fr *fractal) zoom(x, y uint) {
 
 }
 
+// Finish zoom
+func (fr *fractal) mark() {
+
+}
+
 func (fr *fractal) inspect(x, y uint) {
 
 }
@@ -56,8 +61,8 @@ func (fr *fractal) defaultrendercmd() *rendercmd {
 
 func (fr *fractal) replace(pic *img) {
 	w, h := fr.dims()
+	fr.fractal.Call("setAttribute", "src", pic.uri())
 	style := fr.fractal.Get("style")
-	style.Set("background-image", pic.cssurl())
 	style.Set("width", fmt.Sprintf("%vpx", w))
 	style.Set("height", fmt.Sprintf("%vpx", h))
 }
