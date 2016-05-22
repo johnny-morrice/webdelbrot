@@ -113,16 +113,15 @@ func (fr *fractal) zoomin() {
 	fw, fh := float64(w), float64(h)
 	fxmouse, fymouse := float64(fr.xmouse), float64(fr.ymouse)
 
-	zwsect := fw * shrink
-	zhsect := fh * shrink
-
 	botoffset := float64(fr.toolbarheight())
 
+	xbnd := shrink * math.Max(fxmouse, fw - fxmouse)
+
 	fbounds := []float64{
-		fxmouse - zwsect,
-		fw - (fxmouse + zwsect),
-		fymouse - zhsect,
-		(fh - (fymouse + zhsect)) + botoffset,
+		fxmouse - xbnd, 
+		0, 
+		0, 
+		botoffset,
 	}
 
 	bounds := make([]string, len(fbounds))
@@ -143,15 +142,23 @@ func (fr *fractal) zoomin() {
 	}
 
 	if __DEBUG {
+		log.Printf("Dims are: %v %v", fw, fh)
 		log.Printf("Zoom time: %v", elapsed)	
 		log.Printf("Exp is: %v", exp)
 		log.Printf("Shrink factor is %v", shrink)
+		log.Printf("Mouse at %v %v", fxmouse, fymouse)
+
+		genfbounds := make([]interface{}, len(fbounds))
+		for i, b := range fbounds {
+			genfbounds[i] = b
+		}
 
 		genbounds := make([]interface{}, len(bounds))
 		for i, b := range bounds {
 			genbounds[i] = b
 		}
 
+		log.Printf("Fbounds are %v %v %v %v", genfbounds...)
 		log.Printf("Bounds are %v %v %v %v", genbounds...)
 	}
 
