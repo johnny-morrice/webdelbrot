@@ -17,7 +17,6 @@ func getgodel() *Godel {
         __godel = &Godel{}
         __godel.debounce = map[string]*debouncer {}
         __godel.debounce["resize"] = newdebounce(__RESIZE_MS)
-        __godel.debounce["mousedown"] = newdebounce(__ZOOM_MS)
     }
 
     return __godel
@@ -32,10 +31,8 @@ func (godel *Godel) Redraw() {
 }
 
 func (godel *Godel) Fractal_mousedown(event *js.Object) bool {
-    godel.debounce["mousedown"].do(func () {
-        x, y := mousepos(event)
-        getfractal().zoom(x, y)    
-    })
+    x, y := mousepos(event)
+    getfractal().zoom(x, y)    
 
     return false
 }
@@ -47,6 +44,7 @@ func (godel *Godel) Fractal_mousemove(event *js.Object) bool {
 }
 
 func (godel *Godel) Fractal_contextmenu(event *js.Object) bool {
+    getfractal().cancel()
     return false
 }
 

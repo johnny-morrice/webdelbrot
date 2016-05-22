@@ -20,4 +20,4 @@ const __DEBUG = false
 const __RESIZE_MS = 300
 const __ZOOM_MS = 1000 / 60
 // Fraction remaining per second
-const __SHRINK_RATE = 0.9
+const __SHRINK_RATE = 0.5

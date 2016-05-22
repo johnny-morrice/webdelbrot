@@ -27,6 +27,7 @@ type fractal struct {
 	ymouse uint
 	begin time.Time
 	zoombox *js.Object
+	tick *time.Ticker
 
 	lock sync.Mutex
 }
@@ -51,13 +52,10 @@ func (fr *fractal) zoom(x, y uint) {
 	defer fr.lock.Unlock()
 	switch fr.state {
 	case BEGIN:
-		log.Println("Begin zoom")
 		fr.startzoom(x, y)
 		fr.state = PROGRESS
-	case PROGRESS:
-		fr.zoomin()
 	default:
-		panic(fmt.Sprintf("Unknown zoom state: %v", fr.state))
+		panic(fmt.Sprintf("Invalid zoom state: %v", fr.state))
 	}
 }
 
@@ -69,7 +67,6 @@ func (fr *fractal) mark() {
 	case BEGIN:
 		panic(fmt.Sprintf("Invalid zoom state: %v", fr.state))
 	case PROGRESS:
-		log.Println("Mark zoom")
 		fr.markzoom()
 		fr.state = BEGIN
 	default:
@@ -82,7 +79,7 @@ func (fr *fractal) cancel() {
 	defer fr.lock.Unlock()
 	switch fr.state {
 	case BEGIN:
-		panic(fmt.Sprintf("Invalid zoom state: %v", fr.state))
+		log.Printf("Warning: invalid zoom state: %v", fr.state)
 	case PROGRESS:
 		log.Println("Cancel zoom")
 		fr.cleanzoom()
@@ -91,14 +88,24 @@ func (fr *fractal) cancel() {
 }
 
 func (fr *fractal) markzoom() {
+	log.Println("Mark zoom")
+	
 	// Nothing yet
+
+	fr.cleanzoom()
 }
 
 func (fr *fractal) zoomin() {
-	elapsed := time.Now().Sub(fr.begin) * time.Millisecond
-	log.Printf("Milliseconds since zoom start: %v", elapsed)
+	fr.lock.Lock()
+	defer fr.lock.Unlock()
 
-	exp := float64(elapsed) / 1000.0
+	if fr.state != PROGRESS {
+		return
+	}
+
+	elapsed := time.Now().Sub(fr.begin)
+
+	exp := float64(elapsed) / 1000000000.0
 	shrink := math.Pow(__SHRINK_RATE, exp)
 
 	w, h := fr.dims()
@@ -106,8 +113,8 @@ func (fr *fractal) zoomin() {
 	fw, fh := float64(w), float64(h)
 	fxmouse, fymouse := float64(fr.xmouse), float64(fr.ymouse)
 
-	zwsect := (fw * shrink) / 2.0
-	zhsect := (fh * shrink) / 2.0
+	zwsect := fw * shrink
+	zhsect := fh * shrink
 
 	botoffset := float64(fr.toolbarheight())
 
@@ -135,17 +142,49 @@ func (fr *fractal) zoomin() {
 		"bottom",
 	}
 
+	if __DEBUG {
+		log.Printf("Zoom time: %v", elapsed)	
+		log.Printf("Exp is: %v", exp)
+		log.Printf("Shrink factor is %v", shrink)
+
+		genbounds := make([]interface{}, len(bounds))
+		for i, b := range bounds {
+			genbounds[i] = b
+		}
+
+		log.Printf("Bounds are %v %v %v %v", genbounds...)
+	}
+
+
 	for i, p := range props {
 		style := fr.zoombox.Get("style")
 		style.Set(p, bounds[i])
 	}
 }
 
+func (fr *fractal) zoomproc() {
+	// Start zoom tick
+	tick := time.NewTicker(__ZOOM_MS * time.Millisecond)
+	fr.tick = tick
+
+	go func() {
+		for range tick.C {
+			fr.zoomin()
+		}
+	}()
+}
+
 func (fr *fractal) cleanzoom() {
+	if __DEBUG {
+		log.Println("Removing zoombox")
+	}
 	fr.zoombox.Get("parentNode").Call("removeChild", fr.zoombox)
 }
 
 func (fr *fractal) startzoom(x, y uint) {
+	if __DEBUG {
+		log.Println("Begin zoom")
+	}
 	fr.xmouse = x
 	fr.ymouse = y
 
@@ -177,6 +216,8 @@ func (fr *fractal) startzoom(x, y uint) {
 	fr.begin = time.Now()
 
 	document.Get("body").Call("appendChild", fr.zoombox)
+
+	fr.zoomproc()
 }
 
 // React to mouse motion
