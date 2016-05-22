@@ -15,3 +15,9 @@ const __PREFIX = ""
 const __TICKTIME = 250
 const __DEBUG = false
 */
+
+// ADVANCED SETTINGS
+const __RESIZE_MS = 300
+const __ZOOM_MS = 1000 / 60
+// Fraction remaining per second
+const __SHRINK_RATE = 0.9

@@ -7,19 +7,24 @@ import (
 )
 
 func main() {
-    godel := newgodel()
+    godel := getgodel()
     js.Global.Set("godel", js.MakeWrapper(godel))
 }
 
-func newgodel() *Godel {
-    const batchlength = 300
-    godel := &Godel{}
-    godel.debounce = newdebounce(batchlength)
-    return godel
+var __godel *Godel
+func getgodel() *Godel {
+    if __godel == nil {
+        __godel = &Godel{}
+        __godel.debounce = map[string]*debouncer {}
+        __godel.debounce["resize"] = newdebounce(__RESIZE_MS)
+        __godel.debounce["mousedown"] = newdebounce(__ZOOM_MS)
+    }
+
+    return __godel
 }
 
 type Godel struct {
-    debounce *debouncer
+    debounce map[string]*debouncer
 }
 
 func (godel *Godel) Redraw() {
@@ -27,8 +32,11 @@ func (godel *Godel) Redraw() {
 }
 
 func (godel *Godel) Fractal_mousedown(event *js.Object) bool {
-    x, y := mousepos(event)
-    getfractal().zoom(x, y)
+    godel.debounce["mousedown"].do(func () {
+        x, y := mousepos(event)
+        getfractal().zoom(x, y)    
+    })
+
     return false
 }
 
@@ -68,7 +76,7 @@ func mousepos(event *js.Object) (uint, uint) {
 
 
 func (godel *Godel) Window_resize() {
-    godel.debounce.do(func () {
+    godel.debounce["resize"].do(func () {
         gethistory().render()
     })
 }
