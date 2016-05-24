@@ -11,7 +11,15 @@ import (
 
 type rendercmd struct {
 	parent string // parent is CAS address of prezoomed image
+	addr string
 	renreq protocol.RenderRequest
+}
+
+func newcmd(w, h uint) *rendercmd {
+	cmd := &rendercmd{}
+	req := &cmd.renreq.Req
+	req.ImageWidth, req.ImageHeight = w, h
+	return cmd
 }
 
 func (cmd *rendercmd) render() (*img, error) {

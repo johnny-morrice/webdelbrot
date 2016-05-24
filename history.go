@@ -46,3 +46,7 @@ func (h *history) render() {
 		getfractal().replace(pic)
 	}()
 }
+
+func (h *history) zoom(bounds []uint) {
+
+}

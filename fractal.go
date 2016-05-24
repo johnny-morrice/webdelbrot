@@ -89,8 +89,24 @@ func (fr *fractal) cancel() {
 
 func (fr *fractal) markzoom() {
 	log.Println("Mark zoom")
+
+	rect := fr.zoombox.Call("getBoundingClientRect")
+
+	xmin64 := rect.Get("left").Uint64()
+	xmax64 := rect.Get("right").Uint64()
+	ymin64 := rect.Get("top").Uint64()
+	ymax64 := rect.Get("bottom").Uint64()
+
+	bounds := []uint{
+		cropu64(xmin64),
+		cropu64(xmax64),
+		cropu64(ymin64),
+		cropu64(ymax64),
+	}
+
+	bounds = fr.preserveAspect(bounds)
 	
-	// Nothing yet
+	gethistory().zoom(bounds)
 
 	fr.cleanzoom()
 }
@@ -125,8 +141,6 @@ func (fr *fractal) zoomin() {
 		botoffset + fh - fymouse - ybnd,
 	}
 
-	fbounds = preserveAspect(fxmouse, fymouse, fw, fh, fbounds)
-
 	bounds := make([]string, len(fbounds))
 
 	for i, fb := range fbounds {
@@ -151,17 +165,11 @@ func (fr *fractal) zoomin() {
 		log.Printf("Shrink factor is %v", shrink)
 		log.Printf("Mouse at %v %v", fxmouse, fymouse)
 
-		genfbounds := make([]interface{}, len(fbounds))
-		for i, b := range fbounds {
-			genfbounds[i] = b
-		}
-
 		genbounds := make([]interface{}, len(bounds))
 		for i, b := range bounds {
 			genbounds[i] = b
 		}
 
-		log.Printf("Fbounds are %v %v %v %v", genfbounds...)
 		log.Printf("Bounds are %v %v %v %v", genbounds...)
 	}
 
@@ -172,42 +180,48 @@ func (fr *fractal) zoomin() {
 	}
 }
 
-func preserveAspect(x, y, w, h float64, bounds []float64) []float64 {
-	xmin := bounds[0]
-	xmax := bounds[1]
-	ymin := bounds[2]
-	ymax := bounds[3]
+func (fr *fractal) preserveAspect(bounds []uint) []uint {
+	fbounds := make([]float64, len(bounds))
+
+	for i, b := range bounds {
+		fbounds[i] = float64(b)
+	}
+
+	xmin := fbounds[0]
+	xmax := fbounds[1]
+	ymin := fbounds[2]
+	ymax := fbounds[3]
 	bw := xmax - xmin
 	bh := ymax - ymin
 
-	aspect := w / h
+	w, h := fr.dims()
+
+	aspect := float64(w) / float64(h)
 	baspect := bw / bh
 
-	resize := make([]float64, len(bounds))
-	for i, b := range bounds {
+	x := (xmin + xmax) / 2
+	y := (ymin + ymax) / 2
+
+	resize := make([]float64, len(fbounds))
+	for i, b := range fbounds {
 		resize[i] = b
 	}
 
-	// Midpoints
-	// x = (xmax + xmin) / 2
-	// y = (ymax + ymin) / 2
-
-	// Rule: always shrink
-	if aspect < baspect {
-		// Too tall, make thinner
-		thinpart := (bh * aspect) / 2
-		resize[0] = x - thinpart
-		resize[1] = x + thinpart
+	if aspect > baspect {
+		// Too thin, make fatter
+		fatpart := (bh * aspect) / 2
+		resize[0] = x - fatpart
+		resize[1] = x + fatpart
 		if __DEBUG {
-			log.Printf("Made thinner; %v to %v", bw, resize[1] - resize[0])	
+			log.Printf("Made fatter; %v to %v", bw, resize[1] - resize[0])	
 		}
-	} else if aspect > baspect {
-		// Too thin; make shorter
-		shortpart := (bw / aspect) / 2
-		resize[2] = y - shortpart
-		resize[3] = y + shortpart
+	} else if aspect < baspect {
+		// Too short, make taller
+		tallpart := (bw / aspect) / 2
+		resize[2] = y - tallpart
+		resize[3] = y + tallpart
 		if __DEBUG {
-			log.Printf("Made shorter; %v to %v", bh, resize[3] - resize[2])	
+			log.Printf("Made taller; %v to %v", bh, resize[3] - resize[2])	
 		}
 	}
 
@@ -215,18 +229,22 @@ func preserveAspect(x, y, w, h float64, bounds []float64) []float64 {
 		log.Printf("Screen aspect is %v", aspect)
 		log.Printf("Preadjusted zoom aspect was %v", baspect)		
 		log.Printf("Adjusted zoom aspect is %v", (resize[1] - resize[0]) / (resize[3] - resize[2]))
+		log.Printf("Preadjusted bounds were %v", bounds)
+		log.Printf("Adjusted bounds were %v", resize)
+		log.Printf("Center point was %v %v", x, y)
 	}
 
-	return resize
+	uresize := make([]uint, len(resize))
+
+	for i, r := range resize {
+		uresize[i] = uint(math.Floor(r))
+	}
+
+	return uresize
 }
 
 // Restart zoom tick
 func (fr *fractal) zoomproc() {
-
-	if fr.tick != nil {
-		fr.tick.Stop()
-	}
-
 	tick := time.NewTicker(__ZOOM_MS * time.Millisecond)
 	fr.tick = tick
 
@@ -239,7 +257,10 @@ func (fr *fractal) zoomproc() {
 
 func (fr *fractal) cleanzoom() {
 	if __DEBUG {
-		log.Println("Removing zoombox")
+		log.Println("Stopping zoom")
+	}
+	if fr.tick != nil {
+		fr.tick.Stop()
 	}
 	fr.zoombox.Get("parentNode").Call("removeChild", fr.zoombox)
 }
@@ -301,10 +322,8 @@ func (fr *fractal) toolbarheight() uint64 {
 }
 
 func (fr *fractal) defaultrendercmd() *rendercmd {
-	cmd := &rendercmd{}
-	req := &cmd.renreq.Req
-	req.ImageWidth, req.ImageHeight = fr.dims()
-	return cmd
+	w, h := fr.dims()
+	return newcmd(w, h)
 }
 
 func (fr *fractal) replace(pic *img) {
