@@ -116,13 +116,16 @@ func (fr *fractal) zoomin() {
 	botoffset := float64(fr.toolbarheight())
 
 	xbnd := shrink * math.Max(fxmouse, fw - fxmouse)
+	ybnd := shrink * math.Max(fymouse, fh - fymouse)
 
 	fbounds := []float64{
 		fxmouse - xbnd, 
-		0, 
-		0, 
-		botoffset,
+		fw - fxmouse - xbnd, 
+		fymouse - ybnd, 
+		botoffset + fh - fymouse - ybnd,
 	}
+
+	fbounds = preserveAspect(fxmouse, fymouse, fw, fh, fbounds)
 
 	bounds := make([]string, len(fbounds))
 
@@ -169,8 +172,17 @@ func (fr *fractal) zoomin() {
 	}
 }
 
+func preserveAspect(x, y, w, h float64, bounds []float64) []float64 {
+	return bounds
+}
+
+// Restart zoom tick
 func (fr *fractal) zoomproc() {
-	// Start zoom tick
+
+	if fr.tick != nil {
+		fr.tick.Stop()
+	}
+
 	tick := time.NewTicker(__ZOOM_MS * time.Millisecond)
 	fr.tick = tick
 
