@@ -173,7 +173,51 @@ func (fr *fractal) zoomin() {
 }
 
 func preserveAspect(x, y, w, h float64, bounds []float64) []float64 {
-	return bounds
+	xmin := bounds[0]
+	xmax := bounds[1]
+	ymin := bounds[2]
+	ymax := bounds[3]
+	bw := xmax - xmin
+	bh := ymax - ymin
+
+	aspect := w / h
+	baspect := bw / bh
+
+	resize := make([]float64, len(bounds))
+	for i, b := range bounds {
+		resize[i] = b
+	}
+
+	// Midpoints
+	// x = (xmax + xmin) / 2
+	// y = (ymax + ymin) / 2
+
+	// Rule: always shrink
+	if aspect < baspect {
+		// Too tall, make thinner
+		thinpart := (bh * aspect) / 2
+		resize[0] = x - thinpart
+		resize[1] = x + thinpart
+		if __DEBUG {
+			log.Printf("Made thinner; %v to %v", bw, resize[1] - resize[0])	
+		}
+	} else if aspect > baspect {
+		// Too thin; make shorter
+		shortpart := (bw / aspect) / 2
+		resize[2] = y - shortpart
+		resize[3] = y + shortpart
+		if __DEBUG {
+			log.Printf("Made shorter; %v to %v", bh, resize[3] - resize[2])	
+		}
+	}
+
+	if __DEBUG {
+		log.Printf("Screen aspect is %v", aspect)
+		log.Printf("Preadjusted zoom aspect was %v", baspect)		
+		log.Printf("Adjusted zoom aspect is %v", (resize[1] - resize[0]) / (resize[3] - resize[2]))
+	}
+
+	return resize
 }
 
 // Restart zoom tick
