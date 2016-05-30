@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/johnny-morrice/godelbrot/config"
 	"github.com/johnny-morrice/godelbrot/rest/protocol"
 )
 
@@ -22,16 +23,27 @@ func newcmd(w, h uint) *rendercmd {
 	return cmd
 }
 
+func zoomcmd(w, h uint, parent string, bounds config.ZoomBounds) *rendercmd {
+	cmd := newcmd(w, h)
+
+	cmd.renreq.WantZoom = true
+	cmd.renreq.Target = bounds
+	cmd.parent = parent
+
+	return cmd
+}
+
 func (cmd *rendercmd) render() (*img, error) {
 	rest := getclient()
-	png, err := rest.Cycle(cmd.parent, &cmd.renreq)
+	result, err := rest.RenderCycle(cmd.parent, &cmd.renreq)
 	if err != nil {
 		return nil, err
 	}
+	cmd.addr = rest.Url(result.Status.ThisUrl)
 
 	b64 := &bytes.Buffer{}
 	enc := base64.NewEncoder(base64.StdEncoding, b64)
-	_, encerr := io.Copy(enc, png)
+	_, encerr := io.Copy(enc, result.Image)
 	if encerr != nil {
 		return nil, encerr
 	}

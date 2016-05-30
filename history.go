@@ -2,6 +2,8 @@ package main
 
 import (
 	"log"
+
+	"github.com/johnny-morrice/godelbrot/config"
 )
 
 type history struct {
@@ -48,5 +50,18 @@ func (h *history) render() {
 }
 
 func (h *history) zoom(bounds []uint) {
+	zb := config.ZoomBounds{}
+	zb.Xmin = bounds[0]
+	zb.Xmax = bounds[1]
+	zb.Ymin = bounds[2]
+	zb.Ymax = bounds[3]
 
+	x, y := getfractal().dims()
+
+	parent := h.last().addr
+
+	next := zoomcmd(x, y, parent, zb)
+
+	h.frames = append(h.frames, next)
+	h.render()
 }
