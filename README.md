@@ -2,14 +2,11 @@
 
 # Webdelbrot
 
-Web-based mandelbrot viewer based on Godelbrot, the Unix-style Mandelbrot
+Web-based mandelbrot client of Godelbrot, the Unix-style Mandelbrot
 renderer.
 
 http://github.com/johnny-morrice/godelbrot
 
-You will probably also want the static data files
-
-http://github.com/johnny-morrice/webdelbrot-static
 
 ## Demo
 
@@ -17,21 +14,17 @@ http://godelbrot.functorama.com
 
 ## Usage
 
-Webdelbrot behaves like other godelbrot tools.  It is configured by sending the output of configbrot to stdin.
+Webdelbrot is a pure gopherjs client of Godelbrot.
 
-    $ configbrot | webdelbrot
+	# First launch Godelbrot webservice 
+	$ configbrot -fix grow -numerics native | restfulbrot -debug -origins http://localhost:8080
 
-Then point your browser to localhost:8080.
-
-Note the -addr argument allows you to specify network interface.
-
-Webdelbrot has a few other flags.  Try -help.
+	# Now serve with gopherjs
+    $ gopherjs serve  -vw
 
 ## App controls
 
-Left click to begin highlighting zoom region.  Left click again to zoom.
-
-Middle quick or "q" to cancel zoom selection.
+Left click to begin highlighting zoom region.  Hold longer for smaller zoom.  Right click to cancel zooming.
 
 ## Credits
 
