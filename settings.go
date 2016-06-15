@@ -1,10 +1,10 @@
 package main
 
 // These settings are good for development
-const __ADDR = "godelbrot.functorama.mor"
+const __ADDR = "localhost"
 const __PORT = 9898
 const __PREFIX = ""
-const __TICKTIME = 10
+const __TICKTIME = 100
 const __DEBUG = true
 
 // These settings are better for running an internet demo

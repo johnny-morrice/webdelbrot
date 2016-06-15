@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log"
 
 	"github.com/johnny-morrice/godelbrot/config"
 	"github.com/johnny-morrice/godelbrot/rest/protocol"
@@ -29,6 +30,12 @@ func zoomcmd(w, h uint, parent string, bounds config.ZoomBounds) *rendercmd {
 	cmd.renreq.WantZoom = true
 	cmd.renreq.Target = bounds
 	cmd.parent = parent
+
+	if __DEBUG {
+		log.Printf("New rendercmd; w %v h %v parent %v bounds %v", w, h, parent, bounds)
+	} else {
+		log.Printf("New rendercmd has parent %v", parent)
+	}
 
 	return cmd
 }
