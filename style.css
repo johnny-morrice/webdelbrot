@@ -45,6 +45,7 @@ body {
     padding: 0;
     display: inline-block;
     z-index: 0;
+    position: relative;
 }
 
 .center {

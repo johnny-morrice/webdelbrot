@@ -267,7 +267,7 @@ func (fr *fractal) cleanzoom() {
 
 func (fr *fractal) startzoom(x, y uint) {
 	if __DEBUG {
-		log.Println("Begin zoom")
+		log.Printf("Begin zoom at (%v, %v)", x, y)
 	}
 	fr.xmouse = x
 	fr.ymouse = y

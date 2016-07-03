@@ -63,7 +63,7 @@ func (godel *Godel) Fractal_mouseup(event *js.Object) bool {
 }
 
 func mousepos(event *js.Object) (uint, uint) {
-    keys := []string{"x", "y"}
+    keys := []string{"clientX", "clientY"}
     vals := make([]uint, len(keys))
     for i, k := range keys {
         val64 := event.Get(k).Uint64()
