@@ -327,11 +327,7 @@ func (fr *fractal) defaultrendercmd() *rendercmd {
 }
 
 func (fr *fractal) replace(pic *img) {
-	w, h := fr.dims()
 	fr.fractal.Call("setAttribute", "src", pic.uri())
-	style := fr.fractal.Get("style")
-	style.Set("width", fmt.Sprintf("%vpx", w))
-	style.Set("height", fmt.Sprintf("%vpx", h))
 }
 
 func getelementbyid(id string) *js.Object {
