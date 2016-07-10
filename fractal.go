@@ -14,20 +14,26 @@ type zoomstate uint8
 
 const (
 	BEGIN = zoomstate(iota)
-	PROGRESS
+	SELECT
+	WAIT
 )
 
 type fractal struct {
 	fractal *js.Object
 	toolbar *js.Object
 	window *js.Object
-
 	state zoomstate
+
+	// Zooming
 	xmouse uint
 	ymouse uint
 	begin time.Time
 	zoombox *js.Object
-	tick *time.Ticker
+	zoomtick tickerzoom
+
+	// Indicators
+	waitbox *js.Object
+	waittick tickerwait
 
 	lock sync.Mutex
 }
@@ -53,7 +59,7 @@ func (fr *fractal) zoom(x, y uint) {
 	switch fr.state {
 	case BEGIN:
 		fr.startzoom(x, y)
-		fr.state = PROGRESS
+		fr.state = SELECT
 	default:
 		panic(fmt.Sprintf("Invalid zoom state: %v", fr.state))
 	}
@@ -66,7 +72,7 @@ func (fr *fractal) mark() {
 	switch fr.state {
 	case BEGIN:
 		panic(fmt.Sprintf("Invalid zoom state: %v", fr.state))
-	case PROGRESS:
+	case SELECT:
 		fr.markzoom()
 		fr.state = BEGIN
 	default:
@@ -80,7 +86,7 @@ func (fr *fractal) cancel() {
 	switch fr.state {
 	case BEGIN:
 		log.Printf("Warning: invalid zoom state: %v", fr.state)
-	case PROGRESS:
+	case SELECT:
 		log.Println("Cancel zoom")
 		fr.cleanzoom()
 		fr.state = BEGIN
@@ -115,7 +121,7 @@ func (fr *fractal) zoomin() {
 	fr.lock.Lock()
 	defer fr.lock.Unlock()
 
-	if fr.state != PROGRESS {
+	if fr.state != SELECT {
 		return
 	}
 
@@ -240,17 +246,65 @@ func (fr *fractal) preserveAspect(bounds []uint) []uint {
 		uresize[i] = uint(math.Floor(r))
 	}
 
+	fr.launchprogress(uresize)
+
 	return uresize
 }
 
-// Restart zoom tick
-func (fr *fractal) zoomproc() {
+func (fr *fractal) launchprogress(boxdims []uint) {
+
+}
+
+func (fr *fractal) progress() {
+	
+}
+
+type fractaltick interface {
+	tickset(tick *time.Ticker)
+	tickstep(fr *fractal)
+	stop(fr *fractal)
+}
+
+type tickerzoom struct {
+	tick *time.Ticker
+}
+
+func (tz *tickerzoom) tickset(tick *time.Ticker) {
+	tz.tick = tick
+}
+
+func (*tickerzoom) tickstep(fr *fractal) {
+	fr.zoomin()
+}
+
+func (tz *tickerzoom) stop(fr *fractal) {
+	tz.tick.Stop()
+}
+
+type tickerwait struct {
+	tick *time.Ticker
+}
+
+func (*tickerwait) tickstep(fr *fractal) {
+	fr.progress()
+}
+
+func (tw *tickerwait) stop(fr *fractal) {
+	tw.tick.Stop()
+}
+
+func (tw *tickerwait) tickset(tick *time.Ticker) {
+	tw.tick = tick
+}
+
+func (fr *fractal) tickstart(frt fractaltick) {
 	tick := time.NewTicker(__ZOOM_MS * time.Millisecond)
-	fr.tick = tick
+
+	frt.recordtick(tick)
 
 	go func() {
 		for range tick.C {
-			fr.zoomin()
+			frt.tickstep(fr)
 		}
 	}()
 }
@@ -259,9 +313,9 @@ func (fr *fractal) cleanzoom() {
 	if __DEBUG {
 		log.Println("Stopping zoom")
 	}
-	if fr.tick != nil {
-		fr.tick.Stop()
-	}
+
+	fr.zoomtick.stop(fr)
+
 	fr.zoombox.Get("parentNode").Call("removeChild", fr.zoombox)
 }
 
@@ -301,7 +355,7 @@ func (fr *fractal) startzoom(x, y uint) {
 
 	document.Get("body").Call("appendChild", fr.zoombox)
 
-	fr.zoomproc()
+	fr.tickstart(fr.zoomtick)
 }
 
 // React to mouse motion
