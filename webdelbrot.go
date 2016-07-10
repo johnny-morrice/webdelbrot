@@ -55,8 +55,7 @@ func (godel *Godel) Fractal_mousemove(event *js.Object) bool {
 
 func (godel *Godel) Fractal_touchend(event *js.Object) bool {
     stopPropagation(event)
-    x, y := touchpos(event)
-    getfractal().inspect(x, y)
+    getfractal().mark()
     return false
 }
 
