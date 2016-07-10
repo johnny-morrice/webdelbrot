@@ -9,9 +9,9 @@
   <body onload="godel.Redraw();"; onresize="godel.Window_resize();">
     <img class="center" id="fractal" src=""
       onmousedown="return godel.Fractal_mousedown(event);"
-      ontouchstart="return godel.Fractal_mousedown(event);" 
+      ontouchstart="return godel.Fractal_touchstart(event);" 
       onmouseup="return godel.Fractal_mouseup(event);" 
-      ontouchend="return godel.Fractal_mouseup(event);"
+      ontouchend="return godel.Fractal_touchend(event);"
       oncontextmenu="return godel.Fractal_contextmenu();" 
       onmousemove="godel.Fractal_mousemove(event)"
       alt="Mandelbrot set">

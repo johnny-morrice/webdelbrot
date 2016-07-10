@@ -38,9 +38,24 @@ func (godel *Godel) Fractal_mousedown(event *js.Object) bool {
     return false
 }
 
+func (godel *Godel) Fractal_touchstart(event *js.Object) bool {
+    stopPropagation(event)
+    x, y := touchpos(event)
+    getfractal().zoom(x, y)    
+
+    return false
+}
+
 func (godel *Godel) Fractal_mousemove(event *js.Object) bool {
     stopPropagation(event)
     x, y := mousepos(event)
+    getfractal().inspect(x, y)
+    return false
+}
+
+func (godel *Godel) Fractal_touchend(event *js.Object) bool {
+    stopPropagation(event)
+    x, y := touchpos(event)
     getfractal().inspect(x, y)
     return false
 }
@@ -74,6 +89,12 @@ func mousepos(event *js.Object) (uint, uint) {
         vals[i] = cropu64(val64)
     }
     return vals[0], vals[1]
+}
+
+func touchpos(event *js.Object) (uint, uint) {
+    touches := event.Get("touches")
+
+    return mousepos(touches.Index(0))
 }
 
 
