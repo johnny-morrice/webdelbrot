@@ -31,6 +31,7 @@ func (godel *Godel) Redraw() {
 }
 
 func (godel *Godel) Fractal_mousedown(event *js.Object) bool {
+    stopPropagation(event)
     x, y := mousepos(event)
     getfractal().zoom(x, y)    
 
@@ -38,17 +39,20 @@ func (godel *Godel) Fractal_mousedown(event *js.Object) bool {
 }
 
 func (godel *Godel) Fractal_mousemove(event *js.Object) bool {
+    stopPropagation(event)
     x, y := mousepos(event)
     getfractal().inspect(x, y)
     return false
 }
 
 func (godel *Godel) Fractal_contextmenu(event *js.Object) bool {
+    stopPropagation(event)
     getfractal().cancel()
     return false
 }
 
 func (godel *Godel) Fractal_mouseup(event *js.Object) bool {
+    stopPropagation(event)
     switch button := event.Get("button").Uint64(); button {
     case 0:
         getfractal().mark()
@@ -87,4 +91,9 @@ func (godel *Godel) Toolbar_restart_click() bool {
 func (godel *Godel) Toolbar_back_click() bool {
     gethistory().back()
     return false
+}
+
+func stopPropagation(event *js.Object) {
+    event.Call("stopPropagation")
+    event.Call("preventDefault")
 }
