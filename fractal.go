@@ -158,7 +158,7 @@ func (fr *fractal) zoomin() {
 		"bottom",
 	}
 
-	if __DEBUG {
+	if __TRACE {
 		log.Printf("Dims are: %v %v", fw, fh)
 		log.Printf("Zoom time: %v", elapsed)	
 		log.Printf("Exp is: %v", exp)
@@ -310,10 +310,20 @@ func (fr *fractal) inspect(x, y uint) {
 }
 
 func (fr *fractal) dims() (uint, uint) {
-	w := fr.window.Get("innerWidth").Uint64()
-	wh := fr.window.Get("innerHeight").Uint64()
+	body := js.Global.Get("document").Get("body")
+	rect := body.Call("getBoundingClientRect")
+
+	w := rect.Get("width").Uint64()
+
+	wh := rect.Get("height").Uint64()
 	toolh := fr.toolbarheight()
+
 	h := wh - toolh
+
+	if toolh == 0 {
+		h = js.Global.Get("window").Get("innerHeight").Uint64()
+	}
+
 	return cropu64(w), cropu64(h)
 }
 
