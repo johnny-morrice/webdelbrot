@@ -5,6 +5,8 @@ import (
 	"log"
 	"math"
 	"sync"
+	"strings"
+	"strconv"
 	"time"
 
     "github.com/gopherjs/gopherjs/js"
@@ -104,11 +106,40 @@ func (fr *fractal) markzoom() {
 		cropu64(ymax64),
 	}
 
+	style := fr.zoombox.Get("style")
+	
+	leftS := style.Get("left").String()
+	rightS := style.Get("right").String()
+	topS := style.Get("top").String()
+	bottomS := style.Get("bottom").String()
+
+	elembnds := []uint{
+		parsepix(leftS),
+		parsepix(rightS),
+		parsepix(topS),
+		parsepix(bottomS),
+	}
+
+	gethud().loading(elembnds)
+
 	bounds = fr.preserveAspect(bounds)
 	
 	gethistory().zoom(bounds)
 
 	fr.cleanzoom()
+}
+
+func parsepix(px string) uint {
+	num := strings.TrimSuffix(px, "px")
+
+	n, err := strconv.ParseUint(num, 10, 64)
+
+	// Whatever man!
+	if err != nil {
+		panic(err)
+	}
+
+	return uint(n)
 }
 
 func (fr *fractal) zoomin() {
@@ -141,22 +172,21 @@ func (fr *fractal) zoomin() {
 		botoffset + fh - fymouse - ybnd,
 	}
 
-	bounds := make([]string, len(fbounds))
+	ubounds := make([]uint, len(fbounds))
 
 	for i, fb := range fbounds {
 		if fb < 0.0 {
 			fb = 0.0
 		}
-		ib := uint(math.Floor(fb))
-		bounds[i] = fmt.Sprintf("%vpx", ib)
+
+		ub := uint(math.Floor(fb))
+
+		ubounds[i] = ub
 	}
 
-	props := []string{
-		"left",
-		"right",
-		"top",
-		"bottom",
-	}
+	pix := pixbounds(ubounds)
+
+	setbounds(fr.zoombox, pix)
 
 	if __TRACE {
 		log.Printf("Dims are: %v %v", fw, fh)
@@ -165,17 +195,35 @@ func (fr *fractal) zoomin() {
 		log.Printf("Shrink factor is %v", shrink)
 		log.Printf("Mouse at %v %v", fxmouse, fymouse)
 
-		genbounds := make([]interface{}, len(bounds))
-		for i, b := range bounds {
+		genbounds := make([]interface{}, len(ubounds))
+		for i, b := range ubounds {
 			genbounds[i] = b
 		}
 
 		log.Printf("Bounds are %v %v %v %v", genbounds...)
 	}
+}
 
+func pixbounds(bounds []uint) []string {
+	pix := make([]string, len(bounds))
+
+	for i, b := range bounds {
+		pix[i] = fmt.Sprintf("%vpx", b)
+	}
+
+	return pix
+}
+
+func setbounds(elem *js.Object, bounds []string) {
+	props := []string{
+		"left",
+		"right",
+		"top",
+		"bottom",
+	}
 
 	for i, p := range props {
-		style := fr.zoombox.Get("style")
+		style := elem.Get("style")
 		style.Set(p, bounds[i])
 	}
 }
@@ -337,6 +385,7 @@ func (fr *fractal) defaultrendercmd() *rendercmd {
 }
 
 func (fr *fractal) replace(pic *img) {
+	gethud().noloading()
 	fr.fractal.Call("setAttribute", "src", pic.uri())
 }
 
